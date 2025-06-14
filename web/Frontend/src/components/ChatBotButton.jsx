@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { X, Mic, Square, Globe, Send } from "lucide-react";
 import { useSelector } from "react-redux";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from 'remark-gfm';
 
 const ChatBotButton = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,7 +18,7 @@ const ChatBotButton = () => {
   const [selectedLanguage, setSelectedLanguage] = useState("en-US");
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
 
-  const API_URL = "http://127.0.0.1:8000/chat";
+  const API_URL = "http://172.31.4.177:8000/chat";
 
   // Language options
   const languageOptions = [
@@ -361,7 +363,9 @@ const ChatBotButton = () => {
                     }`}
                   >
                     <p className="text-sm whitespace-pre-wrap">
-                      {message.content}
+                      <ReactMarkdown>
+                        {message.content}
+                      </ReactMarkdown>
                     </p>
                     <div
                       className={`text-xs mt-1.5 ${
