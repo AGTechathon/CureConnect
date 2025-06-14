@@ -9,21 +9,27 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
+// Middleware
 app.use(cors({
-    origin: function(origin, callback) {
-        callback(null, true); // allow all origins
-    },
+    origin: 'http://localhost:5173',
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-    exposedHeaders: ['set-cookie']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    exposedHeaders: ['set-cookie'],
+    optionsSuccessStatus: 200
 }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// Database connection
 mongoose.connect(process.env.MONGODB_URI);
 
+// Routes
+const user = require('./routes/userRoute');
+app.use("/api/v1", user);
+
+// 404 handler
 app.use("/", (req, res, next) => {
     res.status(404).json({
         status: "fail",
@@ -32,5 +38,6 @@ app.use("/", (req, res, next) => {
     });
 });
 
+// Start server
 const PORT = process.env.PORT || 5001;
 server.listen(PORT,() => console.log(`Server running on port ${PORT}`));
