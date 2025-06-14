@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { Upload, MessageSquare, Image, Download, RefreshCw, Sparkles } from "lucide-react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import AnalysisResults from '../components/AnalysisResults.jsx';
+import { addMedicalHistory } from '../actions/userActions';
 import jsPDF from 'jspdf';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 
 // Initialize Gemini AI
@@ -143,6 +144,7 @@ const formatAnalysisResults = (text) => {
 };
 
 export default function GeneralAnalysis() {
+    const dispatch = useDispatch();
     const [selectedImage, setSelectedImage] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
     const [analysis, setAnalysis] = useState(null);
@@ -186,6 +188,12 @@ export default function GeneralAnalysis() {
             setAnalysis(formattedResponse);
             setEmergencyLevel(emergencyLevel);
             setShowRedirect(true);
+            if (user) {
+                dispatch(addMedicalHistory(
+                    formattedResponse,  // analysis parameter
+                    cloudinaryUrl       // url parameter
+                ));
+            }
         } catch (error) {
             console.error("Error processing image:", error);
             setAnalysis("Error processing image. Please try again.");
