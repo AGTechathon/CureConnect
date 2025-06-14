@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, AlertCircle, FileText, Calendar, Activity } from 'lucide-react';
+import ReactMarkdown from "react-markdown";
 
 const MedicalHistoryModal = ({ isOpen, onClose, medicalHistory, isLoading, error }) => {
     if (!isOpen) return null;
@@ -93,7 +94,9 @@ const MedicalHistoryModal = ({ isOpen, onClose, medicalHistory, isLoading, error
                                             <div className="prose prose-sm max-w-none">
                                                 {record.analysis.split('\n').map((paragraph, idx) => (
                                                     <p key={idx} className="mb-3 text-gray-700 leading-relaxed">
-                                                        {paragraph}
+                                                        <ReactMarkdown>
+                                                            {paragraph}
+                                                        </ReactMarkdown>
                                                     </p>
                                                 ))}
                                             </div>
