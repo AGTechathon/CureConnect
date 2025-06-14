@@ -9,6 +9,7 @@ import ChatBotButton from "./components/ChatBotButton.jsx";
 import Landing from "./pages/Landing.jsx";
 import LoginSignup from "./components/User/LoginSignup.jsx";
 import Profile from "./components/User/Profile.jsx";
+import HealthTips from "./components/HealthTips.jsx"
 import AnalysisBot from "./pages/AnalysisBot.jsx";
 import GeneralAnalysis from './pages/GeneralAnalysis.jsx';
  
@@ -28,6 +29,7 @@ function App() {
           <Route path='/' element={<Landing />}></Route>
           <Route exact path='/login' element={<LoginSignup />} />
           <Route exact path='/account' element={<Profile user={user} />} />
+          <Route path='/health' element={<HealthTips/>}></Route>
           <Route path='/analysis' element={<AnalysisBot />}></Route>
           <Route path='/analysis/general' element={<GeneralAnalysis/>}></Route>
         </Routes>
