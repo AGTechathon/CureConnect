@@ -1,5 +1,6 @@
 const express = require('express');
 const { registerUser, loginUser, getUserDetails, logout, getAllDoctors, addMedicalHistory, getMedicalHistory } = require('../controller/userController');
+const { createEmergencyNotification, getEmergencyNotifications } = require('../controller/emergencyController');
 const { isAuthenticatedUser, authorizeRoles } = require('../middleware/auth');
 
 const router = express.Router()
@@ -18,6 +19,12 @@ router.route("/medical-history")
 
 router.route("/medical-history/:userId")
     .get(isAuthenticatedUser, getMedicalHistory)
+
+router.route("/emergency/notify")
+    .post(isAuthenticatedUser, createEmergencyNotification);
+
+router.route("/emergency/notifications")
+    .get(isAuthenticatedUser, authorizeRoles("doctor"), getEmergencyNotifications);
 
 
 module.exports = router

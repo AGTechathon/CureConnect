@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { loadUser } from './actions/userActions.js';
 import { useSelector } from 'react-redux';
@@ -10,10 +10,11 @@ import Landing from "./pages/Landing.jsx";
 import LoginSignup from "./components/User/LoginSignup.jsx";
 import Profile from "./components/User/Profile.jsx";
 import HealthTips from "./components/HealthTips.jsx"
-import Chat from "./components/Chat/Chat.jsx"
+import Chat from "./components/Chat/Chat.jsx";
+import VideoCall from "./components/VideoCall.jsx";
 import AnalysisBot from "./pages/AnalysisBot.jsx";
 import GeneralAnalysis from './pages/GeneralAnalysis.jsx';
- 
+
 
 function App() {
   const { user } = useSelector((state) => state.user);
@@ -30,13 +31,21 @@ function App() {
           <Route path='/' element={<Landing />}></Route>
           <Route exact path='/login' element={<LoginSignup />} />
           <Route exact path='/account' element={<Profile user={user} />} />
-          <Route path='/health' element={<HealthTips/>}></Route>
-          <Route path='/chat' element={<Chat/>}></Route>
+          <Route path='/health' element={<HealthTips />}></Route>
+          <Route path='/chat' element={<Chat />}></Route>
           <Route path='/analysis' element={<AnalysisBot />}></Route>
-          <Route path='/analysis/general' element={<GeneralAnalysis/>}></Route>
+          <Route path='/analysis/general' element={<GeneralAnalysis />}></Route>
+          <Route
+            path='/telemedicine'
+            element={<VideoCall />}
+          />
+          <Route
+            path='/emergency'
+            element={<Navigate to="https://video-call-final-git-main-orthodox-64s-projects.vercel.app/?roomID=emergency" replace />}
+          />
         </Routes>
         <Footer />
-        <ChatBotButton/>
+        <ChatBotButton />
       </div>
     </div>
   );
