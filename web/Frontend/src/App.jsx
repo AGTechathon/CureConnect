@@ -14,6 +14,7 @@ import Chat from "./components/Chat/Chat.jsx";
 import VideoCall from "./components/VideoCall.jsx";
 import AnalysisBot from "./pages/AnalysisBot.jsx";
 import GeneralAnalysis from './pages/GeneralAnalysis.jsx';
+import SpecificAnalysis from "./pages/SpecificAnalysis.jsx";
 
 
 function App() {
@@ -35,6 +36,7 @@ function App() {
           <Route path='/chat' element={<Chat />}></Route>
           <Route path='/analysis' element={<AnalysisBot />}></Route>
           <Route path='/analysis/general' element={<GeneralAnalysis />}></Route>
+          <Route path='/analysis/specific' element={<SpecificAnalysis />}></Route>
           <Route
             path='/telemedicine'
             element={<VideoCall />}
