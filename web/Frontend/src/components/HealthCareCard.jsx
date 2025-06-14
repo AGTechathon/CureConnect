@@ -123,14 +123,7 @@ function Cards() {
                 event.results[event.results.length - 1][0].transcript.toLowerCase();
             console.log("Recognized:", transcript);
 
-            if (transcript.includes("open telemedicine")) {
-                // Open external telemedicine site
-                window.open(
-                    "https://video-call-final-git-main-orthodox-64s-projects.vercel.app/?roomID=emergency",
-                    "_blank",
-                    "noopener,noreferrer"
-                );
-            } else if (transcript.includes("emergency")) {
+            if (transcript.includes("emergency")) {
                 // Open external emergency site
                 window.open(
                     "https://tinyurl.com/4jdnrr5b",
@@ -142,13 +135,7 @@ function Cards() {
                     transcript.includes(card.title.toLowerCase())
                 );
                 if (matchedCard) {
-                    if (matchedCard.route === "telemedicine") {
-                        window.open(
-                            "https://video-call-final-git-main-orthodox-64s-projects.vercel.app/?roomID=emergency",
-                            "_blank",
-                            "noopener,noreferrer"
-                        );
-                    } else if (matchedCard.route === "emergency") {
+                    if (matchedCard.route === "emergency") {
                         window.open(
                             "https://tinyurl.com/4jdnrr5b",
                             "_blank",
@@ -240,14 +227,8 @@ const HealthcareCards = () => {
             console.log("Recognized:", transcript);
 
             if (transcript.includes("telemedicine")) {
-                // Open external telemedicine site
-                window.open(
-                    "https://video-call-final-git-main-orthodox-64s-projects.vercel.app/?roomID=emergency",
-                    "_blank",
-                    "noopener,noreferrer"
-                );
+                navigate("/telemedicine");
             } else if (transcript.includes("emergency")) {
-                // Open external emergency site
                 window.open(
                     "https://tinyurl.com/4jdnrr5b",
                     "_blank",
