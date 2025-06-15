@@ -1,113 +1,28 @@
-import { useState, useRef, useEffect } from "react";
-import axios from "axios";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
+import Header from '../components/Header';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import Header from '../components/Header';
 import { useSelector, useDispatch } from 'react-redux';
 import { addMedicalHistory } from '../actions/userActions';
 import Disclaimer from '../components/Disclaimer';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import AnalysisResults from '../components/AnalysisResults';
 import { useNavigate } from 'react-router-dom';
 
 const genAI = new GoogleGenerativeAI("AIzaSyASSY9fkUZY2Q9cYsCd-mTMK0sr98lPh30");
 
-const uploadToCloudinary = async (file) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", "teleconnect");
-
-    try {
-        const response = await axios.post(
-            "https://api.cloudinary.com/v1_1/dfwzeazkg/image/upload",
-            formData
-        );
-        return response.data.secure_url;
-    } catch (error) {
-        console.error("Error uploading to Cloudinary:", error);
-        throw error;
-    }
-};
-
-const formatAnalysisResults = (text) => {
-    const lines = text.split('\n').filter(line => line.trim() !== '');
-    
-    return lines.map((line, index) => {
-        // Remove asterisks and format based on content
-        const cleanLine = line.replace(/\*\*/g, '');
-        
-        if (cleanLine.match(/^(Medical Condition|Confidence Score|Type|Affected Region|Recommendation|Additional Observations)/i)) {
-            return {
-                type: 'header',
-                content: cleanLine
-            };
-        }
-        return {
-            type: 'content',
-            content: cleanLine
-        };
-    });
-};
-
-const simplifyAnalysis = async (medicalAnalysis) => {
-    try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-        
-        const prompt = `You are a medical translator who specializes in explaining complex medical terms in simple, easy-to-understand language. 
-        Please convert this medical analysis into simple terms that someone without a medical background can understand.
-        Keep the same structure but use everyday language. Here's the analysis:
-
-        ${medicalAnalysis}
-
-        Please provide the simplified version while maintaining the key information.`;
-
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
-    } catch (error) {
-        console.error("Error simplifying analysis:", error);
-        throw new Error("Failed to simplify the analysis. Please try again.");
-    }
-};
-
-const analyzeImage = async (imageUrl) => {
-    try {
-        // Fetch image and convert to Base64
-        const response = await fetch(imageUrl);
-        const blob = await response.blob();
-
-        const base64Image = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => resolve(reader.result.split(",")[1]); 
-            reader.onerror = reject;
-        });
-
-        const result = await genAI.models.generateContent({
-            model: "gemini-2.0-flash",
-            contents: [
-                { role: "user", parts: [{ text: "You are an expert ophthalmologist specializing in retinopathy detection. Analyze the provided retinal image and determine whether it indicates signs of retinopathy. Provide a confidence score (in percentage) for your diagnosis. If retinopathy is detected, also mention the type and severity with a probability score and in a user-friendly language." }] },
-                { role: "user", parts: [{ inlineData: { mimeType: "image/png", data: base64Image } }] }
-            ],
-        });
-
-        return result.text();
-    } catch (error) {
-        console.error("Error analyzing image:", error);
-        throw error;
-    }
-};
-
-export default function Retinopathy() {
+function CancerVideoAnalysis() {
     const dispatch = useDispatch();
     const navigate = useNavigate();
-    const [selectedImage, setSelectedImage] = useState(null);
-    const [imagePreview, setImagePreview] = useState(null);
-    const [analysis, setAnalysis] = useState(null);
+    const [selectedVideo, setSelectedVideo] = useState(null);
+    const [videoPreview, setVideoPreview] = useState(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [logoImageData, setLogoImageData] = useState(null);
     const [isSimplifying, setIsSimplifying] = useState(false);
     const [isSimplified, setIsSimplified] = useState(false);
+    const [analysis, setAnalysis] = useState(null);
+    const [logoImageData, setLogoImageData] = useState(null);
+    const { user } = useSelector(state => state.user);
     const fileInputRef = useRef(null);
     const [emergencyLevel, setEmergencyLevel] = useState(null);
     const [countdown, setCountdown] = useState(5);
@@ -120,8 +35,8 @@ export default function Retinopathy() {
             try {
                 const img = new Image();
                 img.crossOrigin = 'Anonymous';
-                img.src = './logo.png';
-                
+                img.src = '/logo.png';
+
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     canvas.width = img.width;
@@ -138,29 +53,51 @@ export default function Retinopathy() {
         loadLogo();
     }, []);
 
-    const handleImageChange = (e) => {
-        const file = e.target.files[0];
+    const handleVideoUpload = (event) => {
+        const file = event.target.files[0];
         if (file) {
-            setSelectedImage(file);
-            const reader = new FileReader();
-            reader.onloadend = () => setImagePreview(reader.result);
-            reader.readAsDataURL(file);
+            setSelectedVideo(file);
+            const videoUrl = URL.createObjectURL(file);
+            setVideoPreview(videoUrl);
+        }
+    };
+
+    const uploadToCloudinary = async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', 'teleconnect');
+
+        try {
+            const response = await axios.post(
+                'https://api.cloudinary.com/v1_1/dfwzeazkg/video/upload',
+                formData
+            );
+            return response.data.secure_url;
+        } catch (error) {
+            console.error('Error uploading to Cloudinary:', error);
+            throw error;
         }
     };
 
     const handleUploadAndAnalyze = async () => {
-        if (!selectedImage) return;
+        if (!selectedVideo) return;
 
         setIsAnalyzing(true);
-        setAnalysis(null);
-
         try {
-            const cloudinaryUrl = await uploadToCloudinary(selectedImage);
-            const result = await analyzeImage(cloudinaryUrl);
-            setAnalysis(result);
+            // Upload video to Cloudinary
+            const videoUrl = await uploadToCloudinary(selectedVideo);
+            console.log(videoUrl);
+            
+            // Send to backend for analysis
+            const response = await axios.post('http://172.31.4.177:5050/analyze', {
+                video_url: videoUrl,
+                prompt: "Analyze this PET scan video for any signs of cancer or abnormal cell growth. Focus on areas of increased metabolic activity and potential tumor markers. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed."
+            });
+
+            setAnalysis(response.data.analysis);
 
             // Extract emergency level from the analysis
-            const emergencyLevelMatch = result.match(/Emergency Level:\s*(\d)/i);
+            const emergencyLevelMatch = response.data.analysis.match(/Emergency Level:\s*(\d)/i);
             const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
             setEmergencyLevel(level);
             setShowRedirect(true);
@@ -168,56 +105,24 @@ export default function Retinopathy() {
             // Update medical history
             if (user) {
                 dispatch(addMedicalHistory(
-                    result,  // analysis parameter
-                    cloudinaryUrl  // url parameter
+                    response.data.analysis,  // analysis parameter
+                    videoUrl                 // url parameter
                 ));
             }
         } catch (error) {
-            console.error("Error processing image:", error);
-            setAnalysis("Error processing image. Please try again.");
+            console.error('Error during analysis:', error);
+            setAnalysis('Error during analysis. Please try again.');
         } finally {
             setIsAnalyzing(false);
         }
     };
 
-    const handleDrop = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            const file = e.dataTransfer.files[0];
-            setSelectedImage(file);
-            
-            const reader = new FileReader();
-            reader.onloadend = () => setImagePreview(reader.result);
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleDragOver = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-
     const resetAnalysis = () => {
-        setSelectedImage(null);
-        setImagePreview(null);
+        setSelectedVideo(null);
+        setVideoPreview(null);
         setAnalysis(null);
-    };
-
-    const handleSimplify = async () => {
-        if (!analysis) return;
-        
-        setIsSimplifying(true);
-        try {
-            const simplifiedAnalysis = await simplifyAnalysis(analysis);
-            setAnalysis(simplifiedAnalysis);
-            setIsSimplified(true);
-        } catch (error) {
-            console.error("Error simplifying analysis:", error);
-            alert("Failed to simplify the analysis. Please try again.");
-        } finally {
-            setIsSimplifying(false);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
         }
     };
 
@@ -253,7 +158,7 @@ export default function Retinopathy() {
             doc.setFontSize(16);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(0, 51, 102); // Dark blue color for header
-            doc.text("CureConnect - Retinopathy Scan Analysis Report", pageWidth / 2, 20, { align: 'center' });
+            doc.text("CureConnect - PET Video Analysis Report", pageWidth / 2, 20, { align: 'center' });
 
             // Add footer with logo and text
             const addFooter = () => {
@@ -280,7 +185,7 @@ export default function Retinopathy() {
             doc.setFontSize(24);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(0, 51, 102);
-            doc.text("Retinopathy Scan Analysis Report", pageWidth / 2, yPosition, { align: 'center' });
+            doc.text("PET Video Analysis Report", pageWidth / 2, yPosition, { align: 'center' });
 
             // Add a decorative line
             yPosition += 10;
@@ -298,6 +203,8 @@ export default function Retinopathy() {
             yPosition += 10;
             doc.setFontSize(12);
             doc.setFont("helvetica", "normal");
+            doc.text(`Patient Name: ${user?.name || 'Not Available'}`, margin, yPosition);
+            yPosition += 10;
             doc.text(`Date: ${new Date().toLocaleString()}`, margin, yPosition);
 
             // Analysis Results - Bold Header
@@ -345,7 +252,7 @@ export default function Retinopathy() {
             addFooter();
 
             // Save the PDF with a proper filename
-            const filename = `Retinopathy_Scan_Report_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
+            const filename = `PET_Video_Report_${user?.name?.replace(/\s+/g, '_') || 'Patient'}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
             doc.save(filename);
             
             return true;
@@ -353,6 +260,91 @@ export default function Retinopathy() {
             console.error('Error generating PDF:', error);
             alert("There was an error generating the PDF. Please try again.");
             return false;
+        }
+    };
+
+    const formatAnalysisResults = (text) => {
+        const lines = text.split('\n').filter(line => line.trim() !== '');
+        
+        return lines.map((line, index) => {
+            // Remove asterisks and format based on content
+            const cleanLine = line.replace(/\*\*/g, '');
+            
+            if (cleanLine.match(/^(Medical Condition|Confidence Score|Type|Affected Region|Recommendation|Additional Observations)/i)) {
+                return {
+                    type: 'header',
+                    content: cleanLine
+                };
+            }
+            return {
+                type: 'content',
+                content: cleanLine
+            };
+        });
+    };
+
+    const simplifyAnalysis = async (medicalAnalysis) => {
+        try {
+            const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+            
+            const prompt = `You are a medical translator who specializes in explaining complex medical terms in simple, easy-to-understand language. 
+            Please convert this medical analysis into simple terms that someone without a medical background can understand.
+            Keep the same structure but use everyday language. Here's the analysis:
+
+            ${medicalAnalysis}
+
+            Please provide the simplified version while maintaining the key information.`;
+
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            return response.text();
+        } catch (error) {
+            console.error("Error simplifying analysis:", error);
+            throw new Error("Failed to simplify the analysis. Please try again.");
+        }
+    };
+
+    const analyzeImage = async (imageUrl) => {
+        try {
+            // Fetch image and convert to Base64
+            const response = await fetch(imageUrl);
+            const blob = await response.blob();
+
+            const base64Image = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(blob);
+                reader.onloadend = () => resolve(reader.result.split(",")[1]); 
+                reader.onerror = reject;
+            });
+
+            const result = await genAI.models.generateContent({
+                model: "gemini-2.0-flash",
+                contents: [
+                    { role: "user", parts: [{ text: "You are an expert oncologist specializing in cancer detection. Analyze the provided medical image and determine whether it indicates signs of cancer. Provide a confidence score (in percentage) for your diagnosis. If cancer is detected, also mention the suspected type and affected region with a probability score and in a user-friendly language." }] },
+                    { role: "user", parts: [{ inlineData: { mimeType: "image/png", data: base64Image } }] }
+                ],
+            });
+
+            return result.text();
+        } catch (error) {
+            console.error("Error analyzing image:", error);
+            throw error;
+        }
+    };
+
+    const handleSimplify = async () => {
+        if (!analysis) return;
+        
+        setIsSimplifying(true);
+        try {
+            const simplifiedAnalysis = await simplifyAnalysis(analysis);
+            setAnalysis(simplifiedAnalysis);
+            setIsSimplified(true);
+        } catch (error) {
+            console.error("Error simplifying analysis:", error);
+            alert("Failed to simplify the analysis. Please try again.");
+        } finally {
+            setIsSimplifying(false);
         }
     };
 
@@ -388,69 +380,60 @@ export default function Retinopathy() {
     };
 
     return (
-        <div className="min-h-screen bg-blue-50">
+        <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
             <div className="max-w-4xl mx-auto px-4 py-8">
-                {/* Header */}
-                <div className="flex items-center justify-center mb-8">
-                    <svg className="w-8 h-8 text-blue-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                        <path fillRule="evenodd" d="M7 2a1 1 0 00-.707 1.707L7 4.414v3.758a1 1 0 01-.293.707l-4 4C.817 14.769 2.156 18 4.828 18h10.343c2.673 0 4.012-3.231 2.122-5.121l-4-4A1 1 0 0113 8.172V4.414l.707-.707A1 1 0 0013 2H7zm2 6.172V4h2v4.172a3 3 0 00.879 2.12l1.027 1.028a4 4 0 00-2.171.102l-.47.156a4 4 0 01-2.53 0l-.563-.187a1.993 1.993 0 00-.114-.035l1.063-1.063A3 3 0 009 8.172z" clipRule="evenodd" />
-                    </svg>
-                    <h1 className="text-3xl font-bold text-gray-800 ml-2">CureConnect AI Assistant</h1>
-                </div>
+                <Header />
                 
-                {/* Main Container */}
                 <div className="bg-white rounded-2xl shadow-xl p-6 mb-8">
-                    {/* Image Upload Section */}
-                    <div 
-                        className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center mb-6"
-                        onDrop={handleDrop}
-                        onDragOver={handleDragOver}
-                    >
-                        {!imagePreview ? (
-                            <div className="flex flex-col items-center">
-                                <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                </svg>
-                                <h3 className="text-xl text-gray-700 mb-2">Upload a retinal image for retinopathy analysis</h3>
-                                <p className="text-gray-500 mb-4">Click to browse or drag and drop</p>
-                                <input 
-                                    type="file" 
-                                    accept="image/*" 
-                                    onChange={handleImageChange} 
-                                    className="hidden" 
-                                    id="fileInput"
-                                />
-                                <label 
-                                    htmlFor="fileInput" 
-                                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
-                                >
-                                    Select Image
-                                </label>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center">
-                                <img 
-                                    src={imagePreview} 
-                                    alt="Preview" 
-                                    className="max-h-64 max-w-full mb-4 rounded-lg shadow-md" 
-                                />
-                                <div className="flex space-x-4">
-                                    <button 
-                                        onClick={handleUploadAndAnalyze} 
-                                        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
-                                        disabled={isAnalyzing}
+                    {/* Video Upload Section */}
+                    <div className="mb-8">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4">Upload PET Scan Video</h2>
+                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                            {!videoPreview ? (
+                                <div>
+                                    <input
+                                        type="file"
+                                        accept="video/*"
+                                        onChange={handleVideoUpload}
+                                        ref={fileInputRef}
+                                        className="hidden"
+                                        id="video-upload"
+                                    />
+                                    <label
+                                        htmlFor="video-upload"
+                                        className="cursor-pointer inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
                                     >
-                                        {isAnalyzing ? "Analyzing..." : "Analyze Image"}
-                                    </button>
-                                    <button 
-                                        onClick={resetAnalysis} 
-                                        className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded-lg transition-colors"
-                                    >
-                                        Reset
-                                    </button>
+                                        Select Video
+                                    </label>
+                                    <p className="mt-2 text-sm text-gray-500">
+                                        Supported formats: MP4, MOV, AVI
+                                    </p>
                                 </div>
-                            </div>
-                        )}
+                            ) : (
+                                <div className="flex flex-col items-center">
+                                    <video 
+                                        src={videoPreview} 
+                                        controls 
+                                        className="max-h-64 max-w-full mb-4 rounded-lg shadow-md"
+                                    />
+                                    <div className="flex space-x-4">
+                                        <button 
+                                            onClick={handleUploadAndAnalyze} 
+                                            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
+                                            disabled={isAnalyzing}
+                                        >
+                                            {isAnalyzing ? "Analyzing..." : "Analyze Video"}
+                                        </button>
+                                        <button 
+                                            onClick={resetAnalysis} 
+                                            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded-lg transition-colors"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                     
                     {/* Analysis Results Section */}
@@ -470,10 +453,7 @@ export default function Retinopathy() {
                     </div>
                 </div>
                 
-                {/* Disclaimer */}
-                <div className="text-center text-gray-600 text-sm">
-                    <p>This is a demonstration of AI-powered retinopathy detection analysis.</p>
-                </div>
+                <Disclaimer />
 
                 {showRedirect && emergencyLevel && (
                     <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white p-6 rounded-lg shadow-xl z-50">
@@ -540,3 +520,5 @@ export default function Retinopathy() {
         </div>
     );
 }
+
+export default CancerVideoAnalysis; 

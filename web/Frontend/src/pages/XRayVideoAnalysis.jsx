@@ -3,22 +3,24 @@ import axios from 'axios';
 import Header from '../components/Header';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import ImageUpload from '../components/ImageUpload';
-import AnalysisResults from '../components/AnalysisResults';
-import Disclaimer from '../components/Disclaimer';
 import { useSelector, useDispatch } from 'react-redux';
-import { addMedicalHistory, getMedicalHistory } from "./../actions/userActions";
+import { addMedicalHistory } from '../actions/userActions';
+import Disclaimer from '../components/Disclaimer';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import AnalysisResults from '../components/AnalysisResults';
 import { useNavigate } from 'react-router-dom';
 
-function AnalysisBotXRAY() {
+function XRayVideoAnalysis() {
     const dispatch = useDispatch();
     const navigate = useNavigate();
-    const [selectedImage, setSelectedImage] = useState(null);
+    const [selectedVideo, setSelectedVideo] = useState(null);
+    const [videoPreview, setVideoPreview] = useState(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [logoImageData, setLogoImageData] = useState(null);
-    const { user, loading, isAuthenticated } = useSelector(state => state.user);
     const [analysis, setAnalysis] = useState(null);
+    const [logoImageData, setLogoImageData] = useState(null);
+    const { user } = useSelector(state => state.user);
     const fileInputRef = useRef(null);
+    const [isSimplified, setIsSimplified] = useState(false);
     const [emergencyLevel, setEmergencyLevel] = useState(null);
     const [countdown, setCountdown] = useState(5);
     const [showRedirect, setShowRedirect] = useState(false);
@@ -27,10 +29,9 @@ function AnalysisBotXRAY() {
     useEffect(() => {
         const loadLogo = async () => {
             try {
-                // Convert logo to base64 to avoid CORS issues
                 const img = new Image();
                 img.crossOrigin = 'Anonymous';
-                img.src = './logo.png';
+                img.src = '/logo.png';
 
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
@@ -48,14 +49,23 @@ function AnalysisBotXRAY() {
         loadLogo();
     }, []);
 
+    const handleVideoUpload = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            setSelectedVideo(file);
+            const videoUrl = URL.createObjectURL(file);
+            setVideoPreview(videoUrl);
+        }
+    };
+
     const uploadToCloudinary = async (file) => {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('upload_preset', 'teleconnect'); // Replace with your upload preset
+        formData.append('upload_preset', 'teleconnect');
 
         try {
             const response = await axios.post(
-                'https://api.cloudinary.com/v1_1/dfwzeazkg/image/upload', // Replace with your cloud name
+                'https://api.cloudinary.com/v1_1/dfwzeazkg/video/upload',
                 formData
             );
             return response.data.secure_url;
@@ -65,56 +75,39 @@ function AnalysisBotXRAY() {
         }
     };
 
-    const handleImageUpload = async (event) => {
-        const file = event.target.files?.[0];
-        if (file) {
-            try {
-                const reader = new FileReader();
-                reader.onloadend = () => setSelectedImage(reader.result);
-                reader.readAsDataURL(file);
+    const handleUploadAndAnalyze = async () => {
+        if (!selectedVideo) return;
 
-                // Upload to Cloudinary first
-                const cloudinaryUrl = await uploadToCloudinary(file);
-                await analyzeImage(cloudinaryUrl);
-            } catch (error) {
-                console.error('Error handling image upload:', error);
-                setAnalysis("Error uploading image.");
-            }
-        }
-    };
-
-    const analyzeImage = async (imageUrl) => {
         setIsAnalyzing(true);
-        setAnalysis(null);
-        setEmergencyLevel(null);
-        setShowRedirect(false);
-        setCountdown(5);
-        setIsRedirecting(false);
-
         try {
-            const response = await fetch('http://172.31.4.177:8001/xray', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ file_path: imageUrl }),
+            // Upload video to Cloudinary
+            const videoUrl = await uploadToCloudinary(selectedVideo);
+            console.log(videoUrl);
+            
+            // Send to backend for analysis
+            const response = await axios.post('http://172.31.4.177:5050/analyze', {
+                video_url: videoUrl,
+                prompt: "Analyze this X-ray video for signs of abnormalities, fractures, infections, or other conditions. Focus on bone structure, joint alignment, and any unusual patterns. Assess the severity and progression of any detected conditions. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed."
             });
 
-            const data = await response.json();
-            if (response.ok) {
-                setAnalysis(data.prediction);
-                // Extract emergency level from the analysis
-                const emergencyLevelMatch = data.prediction.match(/Emergency Level:\s*(\d)/i);
-                const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
-                setEmergencyLevel(level);
-                setShowRedirect(true);
-            } else {
-                setAnalysis("Error: " + (data.error || "Unexpected response"));
+            setAnalysis(response.data.analysis);
+
+            // Extract emergency level from the analysis
+            const emergencyLevelMatch = response.data.analysis.match(/Emergency Level:\s*(\d)/i);
+            const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
+            setEmergencyLevel(level);
+            setShowRedirect(true);
+
+            // Update medical history
+            if (user) {
+                dispatch(addMedicalHistory(
+                    response.data.analysis,  // analysis parameter
+                    videoUrl                 // url parameter
+                ));
             }
-            dispatch(addMedicalHistory(data.prediction, imageUrl));
         } catch (error) {
-            console.error('Error processing the image:', error);
-            setAnalysis("Error processing the image.");
+            console.error('Error during analysis:', error);
+            setAnalysis('Error during analysis. Please try again.');
         } finally {
             setIsAnalyzing(false);
         }
@@ -151,6 +144,15 @@ function AnalysisBotXRAY() {
         setIsRedirecting(false);
     };
 
+    const resetAnalysis = () => {
+        setSelectedVideo(null);
+        setVideoPreview(null);
+        setAnalysis(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
+
     const generatePDF = () => {
         if (!analysis) {
             alert("No analysis data available to generate PDF.");
@@ -165,7 +167,7 @@ function AnalysisBotXRAY() {
             let yPosition = margin;
 
             // Add sky blue background
-            doc.setFillColor(208, 235, 255); // Light sky blue background
+            doc.setFillColor(208, 235, 255);
             doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
             // Add header with logo and title
@@ -178,11 +180,11 @@ function AnalysisBotXRAY() {
                     console.error('Error adding logo to PDF:', error);
                 }
             }
-
+            
             doc.setFontSize(16);
             doc.setFont("helvetica", "bold");
-            doc.setTextColor(0, 51, 102); // Dark blue color for header
-            doc.text("CureConnect - XRAY Analysis Report", pageWidth / 2, 20, { align: 'center' });
+            doc.setTextColor(0, 51, 102);
+            doc.text("CureConnect - X-Ray Video Analysis Report", pageWidth / 2, 20, { align: 'center' });
 
             // Add footer with logo and text
             const addFooter = () => {
@@ -194,7 +196,7 @@ function AnalysisBotXRAY() {
                     pageHeight - 10,
                     { align: 'center' }
                 );
-
+                
                 if (logoImageData) {
                     try {
                         doc.addImage(logoImageData, 'PNG', pageWidth - margin - 20, pageHeight - 15, 10, 10);
@@ -209,7 +211,7 @@ function AnalysisBotXRAY() {
             doc.setFontSize(24);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(0, 51, 102);
-            doc.text("XRAY Analysis Report", pageWidth / 2, yPosition, { align: 'center' });
+            doc.text("X-Ray Video Analysis Report", pageWidth / 2, yPosition, { align: 'center' });
 
             // Add a decorative line
             yPosition += 10;
@@ -223,7 +225,7 @@ function AnalysisBotXRAY() {
             doc.setFont("helvetica", "bold");
             doc.setTextColor(51, 51, 51);
             doc.text("Patient Information", margin, yPosition);
-
+            
             yPosition += 10;
             doc.setFontSize(12);
             doc.setFont("helvetica", "normal");
@@ -231,54 +233,47 @@ function AnalysisBotXRAY() {
             yPosition += 10;
             doc.text(`Date: ${new Date().toLocaleString()}`, margin, yPosition);
 
-            // Analysis Results - Bold Header
+            // Analysis Results
             yPosition += 20;
             doc.setFontSize(14);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(0, 51, 102);
             doc.text("Analysis Results:", margin, yPosition);
 
-            // Format analysis text with proper wrapping
             yPosition += 10;
             doc.setFont("helvetica", "normal");
             doc.setFontSize(12);
             doc.setTextColor(51, 51, 51);
-
+            
             const splitText = doc.splitTextToSize(analysis, pageWidth - (2 * margin));
-
-            // Check if text might overflow to next page
+            
             if (yPosition + (splitText.length * 7) > pageHeight - margin) {
                 addFooter();
                 doc.addPage();
-
-                // Add background to new page
                 doc.setFillColor(208, 235, 255);
                 doc.rect(0, 0, pageWidth, pageHeight, 'F');
-
                 yPosition = margin;
             }
-
+            
             doc.text(splitText, margin, yPosition);
-
+            
             // Add a box around the analysis text
             const textHeight = splitText.length * 7;
             doc.setDrawColor(0, 102, 204);
             doc.setLineWidth(0.3);
             doc.roundedRect(margin - 5, yPosition - 5, pageWidth - (2 * margin) + 10, textHeight + 10, 3, 3);
 
-            // Add timestamp at the bottom
+            // Add timestamp
             yPosition = pageHeight - 30;
             doc.setFontSize(10);
             doc.setTextColor(102, 102, 102);
             doc.text(`Generated on: ${new Date().toLocaleString()}`, margin, yPosition);
 
-            // Add footer to the last page
             addFooter();
 
-            // Save the PDF with a proper filename
-            const filename = `ECG_Report_${user?.name?.replace(/\s+/g, '_') || 'Patient'}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
+            const filename = `XRay_Video_Report_${user?.name?.replace(/\s+/g, '_') || 'Patient'}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
             doc.save(filename);
-
+            
             return true;
         } catch (error) {
             console.error('Error generating PDF:', error);
@@ -287,38 +282,124 @@ function AnalysisBotXRAY() {
         }
     };
 
-    // Reset the analysis state
-    const resetAnalysis = () => {
-        setSelectedImage(null);
-        setAnalysis(null);
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
-
     return (
         <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
             <div className="max-w-4xl mx-auto px-4 py-8">
                 <Header />
                 <div className="bg-white rounded-2xl shadow-xl p-6 mb-8">
-                    <ImageUpload
-                        selectedImage={selectedImage}
-                        fileInputRef={fileInputRef}
-                        handleImageUpload={handleImageUpload}
-                        resetAnalysis={resetAnalysis}
-                    />
-                    <AnalysisResults
-                        isAnalyzing={isAnalyzing}
-                        analysis={analysis}
-                    />
-                    {analysis && (
-                        <button
-                            onClick={generatePDF}
-                            className="mt-4 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors shadow-md"
-                        >
-                            Download Report
-                        </button>
-                    )}
+                    <div className="text-center mb-8">
+                        <h1 className="text-3xl font-bold text-gray-900 mb-2">X-Ray Video Analysis</h1>
+                        <p className="text-gray-600">Upload a video for AI-powered X-Ray analysis</p>
+                    </div>
+
+                    <div className="space-y-6">
+                        {/* Video Upload Section */}
+                        <div className="bg-gray-50 rounded-xl p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center">
+                                    <svg className="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                                    </svg>
+                                    <h2 className="text-xl font-semibold text-gray-700 ml-2">Upload Video</h2>
+                                </div>
+                                {selectedVideo && (
+                                    <button
+                                        onClick={resetAnalysis}
+                                        className="text-red-500 hover:text-red-600 transition-colors"
+                                    >
+                                        Reset
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="space-y-4">
+                                <div
+                                    className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors cursor-pointer"
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        onChange={handleVideoUpload}
+                                        accept="video/*"
+                                        className="hidden"
+                                    />
+                                    {!selectedVideo ? (
+                                        <div>
+                                            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                            </svg>
+                                            <p className="mt-2 text-sm text-gray-600">
+                                                Click to upload or drag and drop
+                                            </p>
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                MP4, MOV, or AVI (max. 100MB)
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <video
+                                                src={videoPreview}
+                                                controls
+                                                className="max-h-64 mx-auto rounded-lg"
+                                            />
+                                            <p className="mt-2 text-sm text-gray-600">
+                                                {selectedVideo.name}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {selectedVideo && !analysis && (
+                                    <button
+                                        onClick={handleUploadAndAnalyze}
+                                        disabled={isAnalyzing}
+                                        className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isAnalyzing ? 'Analyzing...' : 'Analyze Video'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Analysis Results Section */}
+                        <div className="bg-gray-50 rounded-xl p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center">
+                                    <svg className="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                    </svg>
+                                    <h2 className="text-xl font-semibold text-gray-700 ml-2">Analysis Results</h2>
+                                </div>
+                                {analysis && (
+                                    <button
+                                        onClick={generatePDF}
+                                        className="flex items-center bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors"
+                                    >
+                                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                        </svg>
+                                        Download Report
+                                    </button>
+                                )}
+                            </div>
+
+                            {isAnalyzing ? (
+                                <div className="text-center py-8">
+                                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
+                                    <p className="mt-2 text-gray-600">Analyzing video...</p>
+                                </div>
+                            ) : analysis ? (
+                                <div className="bg-white rounded-lg p-4 shadow-inner">
+                                    <p className="text-gray-700 whitespace-pre-wrap">{analysis}</p>
+                                </div>
+                            ) : (
+                                <div className="text-center py-8 text-gray-500">
+                                    Upload and analyze a video to see results
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
                 <Disclaimer />
 
@@ -388,4 +469,4 @@ function AnalysisBotXRAY() {
     );
 }
 
-export default AnalysisBotXRAY;
+export default XRayVideoAnalysis; 

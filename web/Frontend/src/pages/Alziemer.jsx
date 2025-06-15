@@ -27,7 +27,7 @@ const uploadToCloudinary = async (file) => {
 const formatAnalysisResults = (text) => {
     const lines = text.split('\n').filter(line => line.trim() !== '');
     
-    return lines.map(line => {
+    return lines.map((line, index) => {
         // Remove asterisks and format based on content
         const cleanLine = line.replace(/\*\*/g, '');
         
@@ -46,7 +46,7 @@ const formatAnalysisResults = (text) => {
 
 const simplifyAnalysis = async (medicalAnalysis) => {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
         
         const prompt = `You are a medical translator who specializes in explaining complex medical terms in simple, easy-to-understand language. 
         Please convert this medical analysis into simple terms that someone without a medical background can understand.
@@ -60,6 +60,43 @@ const simplifyAnalysis = async (medicalAnalysis) => {
     } catch (error) {
         console.error("Error simplifying analysis:", error);
         throw new Error("Failed to simplify the analysis. Please try again.");
+    }
+};
+
+const analyzeImage = async (imageUrl) => {
+    try {
+        // Fetch image and convert to Base64
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+
+        const base64Image = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = () => resolve(reader.result.split(",")[1]); 
+            reader.onerror = reject;
+        });
+
+        const result = await genAI.models.generateContent({
+            model: "gemini-2.0-flash",
+            contents: [
+                { role: "user", parts: [{ text: "You are an expert neurologist specializing in CT scan analysis. Analyze the provided CT scan image and determine whether it indicates signs of Alzheimer. Provide a confidence score (in percentage) for your diagnosis. If Alzheimer is detected, also mention the suspected type and affected region with a probability score and in a in a user Friendly language. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed." }] },
+                { role: "user", parts: [{ inlineData: { mimeType: "image/png", data: base64Image } }] }
+            ],
+        });
+
+        const text = result.text();
+        setAnalysis(text);
+
+        // Extract emergency level from the analysis
+        const emergencyLevelMatch = text.match(/Emergency Level:\s*(\d)/i);
+        const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
+        setEmergencyLevel(level);
+        setShowRedirect(true);
+
+        return text;
+    } catch (error) {
+        console.error("Error analyzing image:", error);
+        throw error;
     }
 };
 
@@ -77,53 +114,6 @@ export default function AlzheimerVisionAI() {
     const [showRedirect, setShowRedirect] = useState(false);
     const [isRedirecting, setIsRedirecting] = useState(false);
     const navigate = useNavigate();
-
-    const analyzeImage = async (imageUrl) => {
-        try {
-            // Fetch image and convert to Base64
-            const fetchResponse = await fetch(imageUrl);
-            const blob = await fetchResponse.blob();
-
-            const base64Image = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(blob);
-                reader.onloadend = () => resolve(reader.result.split(",")[1]); 
-                reader.onerror = reject;
-            });
-
-            // Get the model
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-            // Create the prompt parts
-            const prompt = "You are an expert neurologist specializing in CT scan analysis. Analyze the provided CT scan image and determine whether it indicates signs of Alzheimer. Provide a confidence score (in percentage) for your diagnosis. If Alzheimer is detected, also mention the suspected type and affected region with a probability score and in a in a user Friendly language. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed.";
-
-            // Generate content
-            const result = await model.generateContent([
-                prompt,
-                {
-                    inlineData: {
-                        mimeType: "image/jpeg",
-                        data: base64Image
-                    }
-                }
-            ]);
-
-            const generatedResponse = await result.response;
-            const text = generatedResponse.text();
-            setAnalysis(text);
-
-            // Extract emergency level from the analysis
-            const emergencyLevelMatch = text.match(/Emergency Level:\s*(\d)/i);
-            const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
-            setEmergencyLevel(level);
-            setShowRedirect(true);
-
-            return text;
-        } catch (error) {
-            console.error("Error analyzing image:", error);
-            throw error;
-        }
-    };
 
     // Load logo image when component mounts
     useEffect(() => {

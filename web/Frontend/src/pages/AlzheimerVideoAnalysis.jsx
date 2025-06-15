@@ -1,39 +1,24 @@
-import { useState, useRef, useEffect } from "react";
-import axios from "axios";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { useSelector, useDispatch } from 'react-redux';
 import { addMedicalHistory } from '../actions/userActions';
+import Header from '../components/Header';
 import Disclaimer from '../components/Disclaimer';
-import { useNavigate } from 'react-router-dom';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
+// Initialize Gemini AI
 const genAI = new GoogleGenerativeAI("AIzaSyASSY9fkUZY2Q9cYsCd-mTMK0sr98lPh30");
-
-const uploadToCloudinary = async (file) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", "teleconnect");
-
-    try {
-        const response = await axios.post(
-            "https://api.cloudinary.com/v1_1/dfwzeazkg/image/upload",
-            formData
-        );
-        return response.data.secure_url;
-    } catch (error) {
-        console.error("Error uploading to Cloudinary:", error);
-        throw error;
-    }
-};
 
 const formatAnalysisResults = (text) => {
     const lines = text.split('\n').filter(line => line.trim() !== '');
-
+    
     return lines.map((line, index) => {
         // Remove asterisks and format based on content
         const cleanLine = line.replace(/\*\*/g, '');
-
+        
         if (cleanLine.match(/^(Medical Condition|Confidence Score|Type|Affected Region|Recommendation|Additional Observations)/i)) {
             return {
                 type: 'header',
@@ -50,11 +35,13 @@ const formatAnalysisResults = (text) => {
 const simplifyAnalysis = async (medicalAnalysis) => {
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
+        
         const prompt = `You are a medical translator who specializes in explaining complex medical terms in simple, easy-to-understand language. 
         Please convert this medical analysis into simple terms that someone without a medical background can understand.
         Keep the same structure but use everyday language. Here's the analysis:
+
         ${medicalAnalysis}
+
         Please provide the simplified version while maintaining the key information.`;
 
         const result = await model.generateContent(prompt);
@@ -66,44 +53,16 @@ const simplifyAnalysis = async (medicalAnalysis) => {
     }
 };
 
-const analyzeImage = async (imageUrl) => {
-    try {
-        // Fetch image and convert to Base64
-        const response = await fetch(imageUrl);
-        const blob = await response.blob();
-
-        const base64Image = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => resolve(reader.result.split(",")[1]); 
-            reader.onerror = reject;
-        });
-
-        const result = await genAI.models.generateContent({
-            model: "gemini-2.0-flash",
-            contents: [
-                { role: "user", parts: [{ text: "You are an expert oncologist specializing in cancer detection. Analyze the provided medical image and determine whether it indicates signs of cancer. Provide a confidence score (in percentage) for your diagnosis. If cancer is detected, also mention the suspected type and affected region with a probability score and in a user-friendly language." }] },
-                { role: "user", parts: [{ inlineData: { mimeType: "image/png", data: base64Image } }] }
-            ],
-        });
-
-        return result.text();
-    } catch (error) {
-        console.error("Error analyzing image:", error);
-        throw error;
-    }
-};
-
-function FinalCancer() {
-    const dispatch = useDispatch();
+function AlzheimerVideoAnalysis() {
     const navigate = useNavigate();
-    const [selectedImage, setSelectedImage] = useState(null);
-    const [imagePreview, setImagePreview] = useState(null);
+    const dispatch = useDispatch();
+    const [selectedVideo, setSelectedVideo] = useState(null);
+    const [videoPreview, setVideoPreview] = useState(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [isSimplifying, setIsSimplifying] = useState(false);
-    const [isSimplified, setIsSimplified] = useState(false);
     const [analysis, setAnalysis] = useState(null);
     const [logoImageData, setLogoImageData] = useState(null);
+    const [isSimplifying, setIsSimplifying] = useState(false);
+    const [isSimplified, setIsSimplified] = useState(false);
     const { user } = useSelector(state => state.user);
     const fileInputRef = useRef(null);
     const [emergencyLevel, setEmergencyLevel] = useState(null);
@@ -111,53 +70,50 @@ function FinalCancer() {
     const [showRedirect, setShowRedirect] = useState(false);
     const [isRedirecting, setIsRedirecting] = useState(false);
 
-    // Load logo image when component mounts
-    useEffect(() => {
-        const loadLogo = async () => {
-            try {
-                const img = new Image();
-                img.crossOrigin = 'Anonymous';
-                img.src = './logo.png';
-
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
-                    const dataURL = canvas.toDataURL('image/png');
-                    setLogoImageData(dataURL);
-                };
-            } catch (error) {
-                console.error('Error loading logo:', error);
-            }
-        };
-        loadLogo();
-    }, []);
-
-    const handleImageChange = (e) => {
-        const file = e.target.files[0];
+    const handleVideoUpload = (event) => {
+        const file = event.target.files[0];
         if (file) {
-            setSelectedImage(file);
-            const reader = new FileReader();
-            reader.onloadend = () => setImagePreview(reader.result);
-            reader.readAsDataURL(file);
+            setSelectedVideo(file);
+            const videoUrl = URL.createObjectURL(file);
+            setVideoPreview(videoUrl);
+        }
+    };
+
+    const resetAnalysis = () => {
+        setSelectedVideo(null);
+        setVideoPreview(null);
+        setAnalysis(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
         }
     };
 
     const handleUploadAndAnalyze = async () => {
-        if (!selectedImage) return;
+        if (!selectedVideo) return;
 
         setIsAnalyzing(true);
+        setEmergencyLevel(null);
+        setShowRedirect(false);
+        setCountdown(5);
+        setIsRedirecting(false);
+
         try {
-            // Upload image to Cloudinary
-            const imageUrl = await uploadToCloudinary(selectedImage);
-            console.log(imageUrl);
-            
-            // Send to backend for analysis
-            const response = await axios.post('http://172.31.4.177:5001/analyze', {
-                image_url: imageUrl,
-                prompt: "Analyze this medical image for any signs of cancer or abnormal cell growth. Focus on areas of increased metabolic activity and potential tumor markers. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed."
+            // Upload video to Cloudinary
+            const formData = new FormData();
+            formData.append('file', selectedVideo);
+            formData.append('upload_preset', 'teleconnect');
+
+            const uploadResponse = await axios.post(
+                'https://api.cloudinary.com/v1_1/dfwzeazkg/video/upload',
+                formData
+            );
+
+            const videoUrl = uploadResponse.data.secure_url;
+
+            // Send video URL to backend for analysis
+            const response = await axios.post('http://172.31.4.177:5050/analyze', {
+                video_url: videoUrl,
+                prompt: "Analyze this video for signs of Alzheimer's disease, focusing on cognitive patterns, movement patterns, and behavioral indicators. Provide a detailed analysis of any observed symptoms and their potential implications. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed."
             });
 
             setAnalysis(response.data.analysis);
@@ -168,49 +124,24 @@ function FinalCancer() {
             setEmergencyLevel(level);
             setShowRedirect(true);
 
-            // Update medical history
+            // Update medical history with video URL
             if (user) {
                 dispatch(addMedicalHistory(
                     response.data.analysis,  // analysis parameter
-                    imageUrl                 // url parameter
+                    videoUrl                 // url parameter
                 ));
             }
         } catch (error) {
             console.error('Error during analysis:', error);
-            setAnalysis('Error during analysis. Please try again.');
+            alert('An error occurred during analysis. Please try again.');
         } finally {
             setIsAnalyzing(false);
         }
     };
 
-    const handleDrop = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            const file = e.dataTransfer.files[0];
-            setSelectedImage(file);
-
-            const reader = new FileReader();
-            reader.onloadend = () => setImagePreview(reader.result);
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleDragOver = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-
-    const resetAnalysis = () => {
-        setSelectedImage(null);
-        setImagePreview(null);
-        setAnalysis(null);
-    };
-
     const handleSimplify = async () => {
         if (!analysis) return;
-
+        
         setIsSimplifying(true);
         try {
             const simplifiedAnalysis = await simplifyAnalysis(analysis);
@@ -226,136 +157,79 @@ function FinalCancer() {
 
     const generatePDF = () => {
         if (!analysis) {
-            alert("No analysis data available to generate PDF.");
+            alert('No analysis data available');
             return;
         }
 
         try {
-            // Create new PDF document
             const doc = new jsPDF();
             const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
             const margin = 20;
-            let yPosition = margin;
+            const contentWidth = pageWidth - (margin * 2);
+            let yPosition = 30; // Starting y position
 
-            // Add sky blue background
-            doc.setFillColor(208, 235, 255); // Light sky blue background
-            doc.rect(0, 0, pageWidth, pageHeight, 'F');
-
-            // Add header with logo and title
+            // Add header with logo
             if (logoImageData) {
-                try {
-                    const logoWidth = 20;
-                    const logoHeight = 20;
-                    doc.addImage(logoImageData, 'PNG', margin, 10, logoWidth, logoHeight);
-                } catch (error) {
-                    console.error('Error adding logo to PDF:', error);
-                }
+                doc.addImage(logoImageData, 'PNG', margin, 10, 30, 30);
+                yPosition = 50; // Adjust y position after logo
             }
 
-            doc.setFontSize(16);
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(0, 51, 102); // Dark blue color for header
-            doc.text("CureConnect - PET Scan Analysis Report", pageWidth / 2, 20, { align: 'center' });
+            // Add title
+            doc.setFontSize(20);
+            doc.setTextColor(41, 128, 185);
+            doc.text('Alzheimer\'s Analysis Report', pageWidth / 2, yPosition, { align: 'center' });
+            yPosition += 20;
 
-            // Add footer with logo and text
-            const addFooter = () => {
+            // Add patient info
+            doc.setFontSize(12);
+            doc.setTextColor(44, 62, 80);
+            doc.text(`Patient Name: ${user?.name || 'Not logged in'}`, margin, yPosition);
+            yPosition += 10;
+            doc.text(`Date: ${new Date().toLocaleDateString()}`, margin, yPosition);
+            yPosition += 10;
+            doc.text(`Time: ${new Date().toLocaleTimeString()}`, margin, yPosition);
+            yPosition += 20;
+
+            // Add analysis results
+            doc.setFontSize(14);
+            doc.setTextColor(41, 128, 185);
+            doc.text('Analysis Results:', margin, yPosition);
+            yPosition += 10;
+
+            // Add analysis text with proper formatting
+            doc.setFontSize(12);
+            doc.setTextColor(44, 62, 80);
+            const splitText = doc.splitTextToSize(analysis, contentWidth);
+            
+            // Add text with page breaks
+            for (let i = 0; i < splitText.length; i++) {
+                if (yPosition > doc.internal.pageSize.getHeight() - 20) {
+                    doc.addPage();
+                    yPosition = 20;
+                }
+                doc.text(splitText[i], margin, yPosition);
+                yPosition += 7;
+            }
+
+            // Add footer
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
                 doc.setFontSize(10);
-                doc.setTextColor(0, 51, 102);
+                doc.setTextColor(128, 128, 128);
                 doc.text(
-                    "Generated by CureConnect",
+                    'Generated by CureConnect - Your Health, Our Priority',
                     pageWidth / 2,
-                    pageHeight - 10,
+                    doc.internal.pageSize.getHeight() - 10,
                     { align: 'center' }
                 );
-
-                if (logoImageData) {
-                    try {
-                        doc.addImage(logoImageData, 'PNG', pageWidth - margin - 20, pageHeight - 15, 10, 10);
-                    } catch (error) {
-                        console.error('Error adding footer logo to PDF:', error);
-                    }
-                }
-            };
-
-            // Report Title
-            yPosition += 30;
-            doc.setFontSize(24);
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(0, 51, 102);
-            doc.text("PET Scan Analysis Report", pageWidth / 2, yPosition, { align: 'center' });
-
-            // Add a decorative line
-            yPosition += 10;
-            doc.setDrawColor(0, 102, 204);
-            doc.setLineWidth(0.5);
-            doc.line(margin, yPosition, pageWidth - margin, yPosition);
-
-            // User Details
-            yPosition += 20;
-            doc.setFontSize(14);
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(51, 51, 51);
-            doc.text("Patient Information", margin, yPosition);
-
-            yPosition += 10;
-            doc.setFontSize(12);
-            doc.setFont("helvetica", "normal");
-            doc.text(`Date: ${new Date().toLocaleString()}`, margin, yPosition);
-
-            // Analysis Results - Bold Header
-            yPosition += 20;
-            doc.setFontSize(14);
-            doc.setFont("helvetica", "bold");
-            doc.setTextColor(0, 51, 102);
-            doc.text("Analysis Results:", margin, yPosition);
-
-            // Format analysis text with proper wrapping
-            yPosition += 10;
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(12);
-            doc.setTextColor(51, 51, 51);
-
-            const splitText = doc.splitTextToSize(analysis, pageWidth - (2 * margin));
-
-            // Check if text might overflow to next page
-            if (yPosition + (splitText.length * 7) > pageHeight - margin) {
-                addFooter();
-                doc.addPage();
-
-                // Add background to new page
-                doc.setFillColor(208, 235, 255);
-                doc.rect(0, 0, pageWidth, pageHeight, 'F');
-
-                yPosition = margin;
             }
 
-            doc.text(splitText, margin, yPosition);
-
-            // Add a box around the analysis text
-            const textHeight = splitText.length * 7;
-            doc.setDrawColor(0, 102, 204);
-            doc.setLineWidth(0.3);
-            doc.roundedRect(margin - 5, yPosition - 5, pageWidth - (2 * margin) + 10, textHeight + 10, 3, 3);
-
-            // Add timestamp at the bottom
-            yPosition = pageHeight - 30;
-            doc.setFontSize(10);
-            doc.setTextColor(102, 102, 102);
-            doc.text(`Generated on: ${new Date().toLocaleString()}`, margin, yPosition);
-
-            // Add footer to the last page
-            addFooter();
-
-            // Save the PDF with a proper filename
-            const filename = `PET_Scan_Report_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
-            doc.save(filename);
-
-            return true;
+            // Save the PDF
+            doc.save(`alzheimers_analysis_${new Date().toISOString().split('T')[0]}.pdf`);
         } catch (error) {
             console.error('Error generating PDF:', error);
-            alert("There was an error generating the PDF. Please try again.");
-            return false;
+            alert('Failed to generate PDF report');
         }
     };
 
@@ -393,45 +267,35 @@ function FinalCancer() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
             <div className="max-w-4xl mx-auto px-4 py-8">
-                <div className="flex items-center justify-center mb-8">
-                    <svg className="w-8 h-8 text-blue-600" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                        <path fillRule="evenodd" d="M7 2a1 1 0 00-.707 1.707L7 4.414v3.758a1 1 0 01-.293.707l-4 4C.817 14.769 2.156 18 4.828 18h10.343c2.673 0 4.012-3.231 2.122-5.121l-4-4A1 1 0 0113 8.172V4.414l.707-.707A1 1 0 0013 2H7zm2 6.172V4h2v4.172a3 3 0 00.879 2.12l1.027 1.028a4 4 0 00-2.171.102l-.47.156a4 4 0 01-2.53 0l-.563-.187a1.993 1.993 0 00-.114-.035l1.063-1.063A3 3 0 009 8.172z" clipRule="evenodd" />
-                    </svg>
-                    <h1 className="text-3xl font-bold text-gray-800 ml-2">CureConnect AI Assistant</h1>
-                </div>
-
+                <Header />
+                
                 <div className="bg-white rounded-2xl shadow-xl p-6 mb-8">
-                    <div 
-                        className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center mb-6"
-                        onDrop={handleDrop}
-                        onDragOver={handleDragOver}
-                    >
-                        {!imagePreview ? (
-                            <div className="flex flex-col items-center">
-                                <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                </svg>
-                                <h3 className="text-xl text-gray-700 mb-2">Upload a medical image for cancer analysis</h3>
-                                <p className="text-gray-500 mb-4">Click to browse or drag and drop</p>
-                                <input 
-                                    type="file" 
-                                    accept="image/*" 
-                                    onChange={handleImageChange} 
-                                    className="hidden" 
-                                    id="fileInput"
+                    {/* Video Upload Section */}
+                    <div className="mb-8">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4">Upload Video for Analysis</h2>
+                        
+                        {!videoPreview ? (
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                                <input
+                                    type="file"
+                                    accept="video/*"
+                                    onChange={handleVideoUpload}
+                                    ref={fileInputRef}
+                                    className="hidden"
                                 />
-                                <label 
-                                    htmlFor="fileInput" 
-                                    className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg transition-colors"
                                 >
-                                    Select Image
-                                </label>
+                                    Select Video
+                                </button>
+                                <p className="mt-2 text-gray-500">Supported formats: MP4, MOV, AVI</p>
                             </div>
                         ) : (
                             <div className="flex flex-col items-center">
-                                <img 
-                                    src={imagePreview} 
-                                    alt="Preview" 
+                                <video 
+                                    src={videoPreview} 
+                                    controls
                                     className="max-h-64 max-w-full mb-4 rounded-lg shadow-md" 
                                 />
                                 <div className="flex space-x-4">
@@ -440,7 +304,7 @@ function FinalCancer() {
                                         className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
                                         disabled={isAnalyzing}
                                     >
-                                        {isAnalyzing ? "Analyzing..." : "Analyze Image"}
+                                        {isAnalyzing ? "Analyzing..." : "Analyze Video"}
                                     </button>
                                     <button 
                                         onClick={resetAnalysis} 
@@ -452,7 +316,8 @@ function FinalCancer() {
                             </div>
                         )}
                     </div>
-
+                    
+                    {/* Analysis Results Section */}
                     <div className="bg-gray-50 rounded-xl p-6">
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center">
@@ -508,11 +373,11 @@ function FinalCancer() {
                                 </div>
                             )}
                         </div>
-
+                        
                         {isAnalyzing ? (
                             <div className="flex flex-col items-center py-10">
                                 <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                <p className="text-gray-600">Processing your image...</p>
+                                <p className="text-gray-600">Processing your video...</p>
                             </div>
                         ) : analysis ? (
                             <div className="bg-white p-4 rounded-lg shadow-sm">
@@ -543,14 +408,14 @@ function FinalCancer() {
                         ) : (
                             <div className="flex flex-col items-center py-10">
                                 <svg className="w-16 h-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                 </svg>
-                                <p className="text-gray-500">Upload a medical image to receive cancer analysis</p>
+                                <p className="text-gray-500">Upload a video to receive analysis</p>
                             </div>
                         )}
                     </div>
                 </div>
-
+                
                 <Disclaimer />
 
                 {showRedirect && emergencyLevel && (
@@ -619,4 +484,4 @@ function FinalCancer() {
     );
 }
 
-export default FinalCancer;
+export default AlzheimerVideoAnalysis; 

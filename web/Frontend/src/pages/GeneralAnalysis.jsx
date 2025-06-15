@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { Upload, MessageSquare, Image, Download, RefreshCw, Sparkles } from "lucide-react";
+import { Upload, MessageSquare, Image, Download, RefreshCw, Sparkles, Camera, X, Play, Square } from "lucide-react";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import AnalysisResults from '../components/AnalysisResults.jsx';
-import { addMedicalHistory } from '../actions/userActions';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import AnalysisResults from '../components/AnalysisResults';
 import jsPDF from 'jspdf';
-import { useSelector, useDispatch } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 
 // Initialize Gemini AI
@@ -144,7 +145,6 @@ const formatAnalysisResults = (text) => {
 };
 
 export default function GeneralAnalysis() {
-    const dispatch = useDispatch();
     const [selectedImage, setSelectedImage] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
     const [analysis, setAnalysis] = useState(null);
@@ -158,9 +158,26 @@ export default function GeneralAnalysis() {
     const [countdown, setCountdown] = useState(5);
     const [showRedirect, setShowRedirect] = useState(false);
     const [isRedirecting, setIsRedirecting] = useState(false);
+
+    // Live camera states
+    const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
+    const [stream, setStream] = useState(null);
+    const [capturedImage, setCapturedImage] = useState(null);
+
     const fileInputRef = useRef(null);
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
     const { user } = useSelector((state) => state.user);
     const navigate = useNavigate();
+
+    // Cleanup camera stream on component unmount
+    useEffect(() => {
+        return () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        };
+    }, [stream]);
 
     const handleImageChange = (e) => {
         const file = e.target.files[0];
@@ -169,6 +186,69 @@ export default function GeneralAnalysis() {
             const reader = new FileReader();
             reader.onloadend = () => setImagePreview(reader.result);
             reader.readAsDataURL(file);
+        }
+    };
+
+    const startLiveCamera = async () => {
+        try {
+            const mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    facingMode: 'environment' // Use back camera on mobile if available
+                }
+            });
+            setStream(mediaStream);
+            setIsLiveCameraActive(true);
+
+            // Set video stream
+            if (videoRef.current) {
+                videoRef.current.srcObject = mediaStream;
+            }
+        } catch (error) {
+            console.error("Error accessing camera:", error);
+            alert("Unable to access camera. Please check your camera permissions.");
+        }
+    };
+
+    const stopLiveCamera = () => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            setStream(null);
+        }
+        setIsLiveCameraActive(false);
+        setCapturedImage(null);
+    };
+
+    const captureSnapshot = () => {
+        if (videoRef.current && canvasRef.current) {
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            const context = canvas.getContext('2d');
+
+            // Set canvas dimensions to match video
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // Draw video frame to canvas
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Convert canvas to blob and create file
+            canvas.toBlob((blob) => {
+                const file = new File([blob], `snapshot_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                setSelectedImage(file);
+
+                // Create preview URL
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setImagePreview(reader.result);
+                    setCapturedImage(reader.result);
+                };
+                reader.readAsDataURL(file);
+
+                // Stop camera after capture
+                stopLiveCamera();
+            }, 'image/jpeg', 0.9);
         }
     };
 
@@ -188,12 +268,6 @@ export default function GeneralAnalysis() {
             setAnalysis(formattedResponse);
             setEmergencyLevel(emergencyLevel);
             setShowRedirect(true);
-            if (user) {
-                dispatch(addMedicalHistory(
-                    formattedResponse,  // analysis parameter
-                    cloudinaryUrl       // url parameter
-                ));
-            }
         } catch (error) {
             console.error("Error processing image:", error);
             setAnalysis("Error processing image. Please try again.");
@@ -251,6 +325,8 @@ export default function GeneralAnalysis() {
         setAnalysis(null);
         setProblemDescription('');
         setIsSimplified(false);
+        setCapturedImage(null);
+        stopLiveCamera();
     };
 
     const generatePDF = () => {
@@ -341,6 +417,7 @@ export default function GeneralAnalysis() {
                     clearInterval(timer);
                     // Handle routing based on emergency level
                     if (emergencyLevel === 1) {
+                        // Redirect first
                         window.location.href = 'https://tinyurl.com/4jdnrr5b';
                     } else if (emergencyLevel === 2) {
                         navigate('/telemedicine');
@@ -377,6 +454,40 @@ export default function GeneralAnalysis() {
 
                 {/* Upload Section */}
                 <div className="bg-white rounded-lg shadow-sm mb-8 p-8">
+                    {/* Live Camera Section */}
+                    {isLiveCameraActive && (
+                        <div className="mb-8">
+                            <div className="relative bg-black rounded-lg overflow-hidden">
+                                <video
+                                    ref={videoRef}
+                                    autoPlay
+                                    playsInline
+                                    className="w-full h-auto max-h-96 object-cover"
+                                />
+                                <canvas ref={canvasRef} className="hidden" />
+
+                                {/* Camera Controls */}
+                                <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-4">
+                                    <button
+                                        onClick={captureSnapshot}
+                                        className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg hover:bg-gray-100 transition-colors"
+                                    >
+                                        <Camera className="w-8 h-8 text-gray-700" />
+                                    </button>
+                                    <button
+                                        onClick={stopLiveCamera}
+                                        className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-lg hover:bg-red-700 transition-colors"
+                                    >
+                                        <X className="w-6 h-6 text-white" />
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="text-center text-gray-600 mt-2">
+                                Position your camera to capture the area you want to analyze, then click the camera button to take a snapshot.
+                            </p>
+                        </div>
+                    )}
+
                     <div
                         className={`border-2 border-dashed rounded-lg p-16 text-center transition-colors ${dragActive
                                 ? 'border-blue-400 bg-blue-50'
@@ -390,7 +501,7 @@ export default function GeneralAnalysis() {
                             <div>
                                 <Upload className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                                 <h3 className="text-xl font-semibold text-gray-700 mb-2">Upload an image for analysis</h3>
-                                <p className="text-gray-500 mb-6">Click to browse or drag and drop</p>
+                                <p className="text-gray-500 mb-6">Click to browse, drag and drop, or use live camera</p>
 
                                 <input
                                     type="file"
@@ -400,12 +511,22 @@ export default function GeneralAnalysis() {
                                     className="hidden"
                                 />
 
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                >
-                                    Browse Files
-                                </button>
+                                <div className="flex gap-4 justify-center">
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                    >
+                                        <Upload className="w-4 h-4" />
+                                        Browse Files
+                                    </button>
+                                    <button
+                                        onClick={startLiveCamera}
+                                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                                    >
+                                        <Camera className="w-4 h-4" />
+                                        Go Live
+                                    </button>
+                                </div>
                             </div>
                         ) : (
                             <div>

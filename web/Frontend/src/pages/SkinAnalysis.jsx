@@ -3,9 +3,14 @@ import axios from "axios";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import { useNavigate } from "react-router-dom";
+import Header from '../components/Header';
+import { useSelector, useDispatch } from 'react-redux';
+import { addMedicalHistory } from '../actions/userActions';
+import Disclaimer from '../components/Disclaimer';
+import AnalysisResults from '../components/AnalysisResults';
+import { useNavigate } from 'react-router-dom';
 
-const genAI = new GoogleGenerativeAI("AIzaSyASSY9fkUZY2Q9cYsCd-mTMK0sr98lPh30");
+const genAI = new GoogleGenerativeAI("AIzaSyAuQy68_9hLOzWYmt_NYryjBQVQf0PHBok");
 
 const uploadToCloudinary = async (file) => {
     const formData = new FormData();
@@ -26,11 +31,11 @@ const uploadToCloudinary = async (file) => {
 
 const formatAnalysisResults = (text) => {
     const lines = text.split('\n').filter(line => line.trim() !== '');
-    
-    return lines.map(line => {
+
+    return lines.map((line, index) => {
         // Remove asterisks and format based on content
         const cleanLine = line.replace(/\*\*/g, '');
-        
+
         if (cleanLine.match(/^(Medical Condition|Confidence Score|Type|Affected Region|Recommendation|Additional Observations)/i)) {
             return {
                 type: 'header',
@@ -46,10 +51,10 @@ const formatAnalysisResults = (text) => {
 
 const simplifyAnalysis = async (medicalAnalysis) => {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
         const prompt = `You are a medical translator who specializes in explaining complex medical terms in simple, easy-to-understand language. 
-        Please convert this skin condition analysis into simple terms that someone without a medical background can understand.
+        Please convert this medical analysis into simple terms that someone without a medical background can understand.
         Keep the same structure but use everyday language. Here's the analysis:
         ${medicalAnalysis}
         Please provide the simplified version while maintaining the key information.`;
@@ -63,7 +68,36 @@ const simplifyAnalysis = async (medicalAnalysis) => {
     }
 };
 
+const analyzeImage = async (imageUrl) => {
+    try {
+        // Fetch image and convert to Base64
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+
+        const base64Image = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = () => resolve(reader.result.split(",")[1]); 
+            reader.onerror = reject;
+        });
+
+        const result = await genAI.models.generateContent({
+            model: "gemini-2.0-flash",
+            contents: [
+                { role: "user", parts: [{ text: "You are an expert dermatologist specializing in skin condition detection. Analyze the provided skin image and determine whether it indicates any concerning conditions. Provide a confidence score (in percentage) for your diagnosis. If a condition is detected, also mention the type and affected region with a probability score and in a user-friendly language." }] },
+                { role: "user", parts: [{ inlineData: { mimeType: "image/png", data: base64Image } }] }
+            ],
+        });
+
+        return result.text();
+    } catch (error) {
+        console.error("Error analyzing image:", error);
+        throw error;
+    }
+};
+
 export default function SkinAnalysis() {
+    const dispatch = useDispatch();
     const navigate = useNavigate();
     const [selectedImage, setSelectedImage] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
@@ -72,6 +106,8 @@ export default function SkinAnalysis() {
     const [logoImageData, setLogoImageData] = useState(null);
     const [isSimplifying, setIsSimplifying] = useState(false);
     const [isSimplified, setIsSimplified] = useState(false);
+    const fileInputRef = useRef(null);
+    const { user } = useSelector(state => state.user);
     const [emergencyLevel, setEmergencyLevel] = useState(null);
     const [countdown, setCountdown] = useState(5);
     const [showRedirect, setShowRedirect] = useState(false);
@@ -111,69 +147,62 @@ export default function SkinAnalysis() {
         }
     };
 
-    const analyzeImage = async (imageUrl) => {
-        try {
-            // Fetch image and convert to Base64
-            const fetchResponse = await fetch(imageUrl);
-            const blob = await fetchResponse.blob();
-
-            const base64Image = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(blob);
-                reader.onloadend = () => resolve(reader.result.split(",")[1]); 
-                reader.onerror = reject;
-            });
-
-            // Get the model
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-            // Create the prompt parts
-            const prompt = "You are an expert dermatologist specializing in skin condition analysis. Analyze the provided skin image and determine whether it indicates any skin conditions, diseases, or abnormalities. Provide a confidence score (in percentage) for your diagnosis. If a condition is detected, also mention the type and severity with a probability score and in a user-friendly language. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed.";
-
-            // Generate content
-            const result = await model.generateContent([
-                prompt,
-                {
-                    inlineData: {
-                        mimeType: "image/jpeg",
-                        data: base64Image
-                    }
-                }
-            ]);
-
-            const generatedResponse = await result.response;
-            const text = generatedResponse.text();
-            setAnalysis(text);
-
-            // Extract emergency level from the analysis
-            const emergencyLevelMatch = text.match(/Emergency Level:\s*(\d)/i);
-            const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
-            setEmergencyLevel(level);
-            setShowRedirect(true);
-
-            return text;
-        } catch (error) {
-            console.error("Error analyzing image:", error);
-            throw error;
-        }
-    };
-
     const handleUploadAndAnalyze = async () => {
         if (!selectedImage) return;
 
         setIsAnalyzing(true);
         setAnalysis(null);
-        
+        setEmergencyLevel(null);
+        setShowRedirect(false);
+        setCountdown(5);
+        setIsRedirecting(false);
+
         try {
-            // Upload image to Cloudinary
-            const imageUrl = await uploadToCloudinary(selectedImage);
+            // Upload to Cloudinary
+            const cloudinaryUrl = await uploadToCloudinary(selectedImage);
             
-            // Analyze the image using local function
-            const analysisText = await analyzeImage(imageUrl);
-            setAnalysis(analysisText);
+            // Check if the file is a video
+            const isVideo = selectedImage.type.startsWith('video/');
+            
+            if (isVideo) {
+                // For videos, send to localhost endpoint
+                const response = await fetch('http://localhost:5050/api/analyze-video', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        video_url: cloudinaryUrl,
+                        description: ""
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to analyze video');
+                }
+
+                const data = await response.json();
+                setAnalysis(data.analysis);
+                setEmergencyLevel(data.emergencyLevel);
+            } else {
+                // For images, use Gemini directly
+                const { formattedResponse, emergencyLevel } = await analyzeImage(cloudinaryUrl);
+                setAnalysis(formattedResponse);
+                setEmergencyLevel(emergencyLevel);
+            }
+
+            setShowRedirect(true);
+
+            // Update medical history if user is logged in
+            if (user) {
+                dispatch(addMedicalHistory(
+                    analysis,
+                    cloudinaryUrl
+                ));
+            }
         } catch (error) {
-            console.error('Error during analysis:', error);
-            setAnalysis('Error during analysis. Please try again.');
+            console.error("Error processing file:", error);
+            setAnalysis("Error processing file. Please try again.");
         } finally {
             setIsAnalyzing(false);
         }
@@ -365,7 +394,8 @@ export default function SkinAnalysis() {
                     clearInterval(timer);
                     // Handle routing based on emergency level
                     if (emergencyLevel === 1) {
-                        navigate('https://tinyurl.com/4jdnrr5b');
+                        // Redirect first
+                        window.location.href = 'https://tinyurl.com/4jdnrr5b';
                     } else if (emergencyLevel === 2) {
                         navigate('/telemedicine');
                     } else if (emergencyLevel === 3) {
@@ -389,7 +419,7 @@ export default function SkinAnalysis() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
             <div className="max-w-4xl mx-auto px-4 py-8">
-                {/* <Header /> */}
+                <Header />
                 
                 <div className="bg-white rounded-2xl shadow-xl p-6 mb-8">
                     {/* Image Upload Section */}
@@ -447,100 +477,18 @@ export default function SkinAnalysis() {
 
                     {/* Analysis Results Section */}
                     <div className="bg-gray-50 rounded-xl p-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center">
-                                <svg className="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                </svg>
-                                <h2 className="text-xl font-semibold text-gray-700 ml-2">Analysis Results</h2>
-                            </div>
-                            {analysis && (
-                                <div className="flex gap-3">
-                                    {!isSimplified ? (
-                                        <button
-                                            onClick={handleSimplify}
-                                            disabled={isSimplifying}
-                                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            {isSimplifying ? (
-                                                <>
-                                                    <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                                    </svg>
-                                                    Simplifying...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                                    </svg>
-                                                    Simplify Terms
-                                                </>
-                                            )}
-                                        </button>
-                                    ) : (
-                                        <button
-                                            onClick={() => {
-                                                setAnalysis(analysis);
-                                                setIsSimplified(false);
-                                            }}
-                                            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                                        >
-                                            Show Medical Terms
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={generatePDF}
-                                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                        </svg>
-                                        Download Report
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-
-                        {isAnalyzing ? (
-                            <div className="flex flex-col items-center py-10">
-                                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                <p className="text-gray-600">Processing your image...</p>
-                            </div>
-                        ) : analysis ? (
-                            <div className="bg-white p-4 rounded-lg shadow-sm">
-                                <div className="space-y-4">
-                                    {formatAnalysisResults(analysis).map((item, index) => (
-                                        <div key={index} className={item.type === 'header' ? 'border-b border-gray-200 pb-2 mb-2' : ''}>
-                                            {item.type === 'header' ? (
-                                                <div className="flex items-start gap-2">
-                                                    <div className="w-2 h-2 rounded-full bg-blue-600 mt-2"></div>
-                                                    <div>
-                                                        <h3 className="text-lg font-semibold text-gray-800">
-                                                            {item.content.split(':')[0]}
-                                                        </h3>
-                                                        <p className="text-gray-700 mt-1">
-                                                            {item.content.split(':')[1]?.trim() || ''}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <p className="text-gray-600 pl-4">
-                                                    {item.content}
-                                                </p>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center py-10">
-                                <svg className="w-16 h-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                <p className="text-gray-500">Upload a skin image to receive analysis</p>
-                            </div>
-                        )}
+                        <AnalysisResults
+                            analysis={analysis}
+                            isAnalyzing={isAnalyzing}
+                            isSimplifying={isSimplifying}
+                            isSimplified={isSimplified}
+                            onSimplify={handleSimplify}
+                            onShowMedicalTerms={() => {
+                                setAnalysis(analysis);
+                                setIsSimplified(false);
+                            }}
+                            onDownloadReport={generatePDF}
+                        />
                     </div>
                 </div>
 

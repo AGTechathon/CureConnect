@@ -1,44 +1,41 @@
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Header from '../components/Header';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
-import Header from '../components/Header';
-import ImageUpload from '../components/ImageUpload';
-import AnalysisResults from '../components/AnalysisResults';
-import Disclaimer from '../components/Disclaimer';
 import { useSelector, useDispatch } from 'react-redux';
-import { addMedicalHistory, getMedicalHistory } from "./../actions/userActions";
+import { addMedicalHistory } from '../actions/userActions';
+import Disclaimer from '../components/Disclaimer';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import AnalysisResults from '../components/AnalysisResults';
 import { useNavigate } from 'react-router-dom';
 
 const genAI = new GoogleGenerativeAI("AIzaSyASSY9fkUZY2Q9cYsCd-mTMK0sr98lPh30");
 
-function AnalysisBotECG() {
+function ECGVideoAnalysis() {
     const dispatch = useDispatch();
     const navigate = useNavigate();
-    const [selectedImage, setSelectedImage] = useState(null);
-    const [imagePreview, setImagePreview] = useState(null);
+    const [selectedVideo, setSelectedVideo] = useState(null);
+    const [videoPreview, setVideoPreview] = useState(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [analysis, setAnalysis] = useState(null);
-    const [logoImageData, setLogoImageData] = useState(null);
-    const { user, loading, isAuthenticated } = useSelector(state => state.user);
-    const fileInputRef = useRef(null);
     const [isSimplifying, setIsSimplifying] = useState(false);
     const [isSimplified, setIsSimplified] = useState(false);
+    const [analysis, setAnalysis] = useState(null);
+    const [logoImageData, setLogoImageData] = useState(null);
+    const { user } = useSelector(state => state.user);
+    const fileInputRef = useRef(null);
     const [emergencyLevel, setEmergencyLevel] = useState(null);
     const [countdown, setCountdown] = useState(5);
     const [showRedirect, setShowRedirect] = useState(false);
     const [isRedirecting, setIsRedirecting] = useState(false);
 
-    // Load logo image when component mounts
     useEffect(() => {
         const loadLogo = async () => {
             try {
-                // Convert logo to base64 to avoid CORS issues
                 const img = new Image();
                 img.crossOrigin = 'Anonymous';
-                img.src = './logo.png';
-                
+                img.src = '/logo.png';
+
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     canvas.width = img.width;
@@ -55,7 +52,15 @@ function AnalysisBotECG() {
         loadLogo();
     }, []);
 
-    // Function to upload image to Cloudinary
+    const handleVideoUpload = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            setSelectedVideo(file);
+            const videoUrl = URL.createObjectURL(file);
+            setVideoPreview(videoUrl);
+        }
+    };
+
     const uploadToCloudinary = async (file) => {
         const formData = new FormData();
         formData.append('file', file);
@@ -63,7 +68,7 @@ function AnalysisBotECG() {
 
         try {
             const response = await axios.post(
-                'https://api.cloudinary.com/v1_1/dfwzeazkg/image/upload',
+                'https://api.cloudinary.com/v1_1/dfwzeazkg/video/upload',
                 formData
             );
             return response.data.secure_url;
@@ -73,60 +78,53 @@ function AnalysisBotECG() {
         }
     };
 
-    // Handle file selection and upload
-    const handleImageUpload = async (event) => {
-        const file = event.target.files?.[0];
-        if (file) {
-            try {
-                const reader = new FileReader();
-                reader.onloadend = () => setSelectedImage(reader.result);
-                reader.readAsDataURL(file);
+    const handleUploadAndAnalyze = async () => {
+        if (!selectedVideo) return;
 
-                const cloudinaryUrl = await uploadToCloudinary(file);
-                await analyzeImage(cloudinaryUrl);
-            } catch (error) {
-                console.error('Error handling image upload:', error);
-                setAnalysis("Error uploading image.");
-            }
-        }
-    };
-
-    // Analyze the uploaded ECG image
-    const analyzeImage = async (imageUrl) => {
         setIsAnalyzing(true);
-        setAnalysis(null);
-
         try {
-            const response = await fetch('http://172.31.4.177:8001/ecg', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ file_path: imageUrl }),
+            // Upload video to Cloudinary
+            const videoUrl = await uploadToCloudinary(selectedVideo);
+            console.log(videoUrl);
+            
+            // Send to backend for analysis
+            const response = await axios.post('http://172.31.4.177:5050/analyze', {
+                video_url: videoUrl,
+                prompt: "Analyze this ECG video for any signs of cardiac abnormalities. Focus on heart rate, rhythm, and potential arrhythmias. Include an Emergency Level (1 for high emergency, 2 for moderate emergency, 3 for low emergency) based on the severity of symptoms observed."
             });
 
-            const data = await response.json();
-            if (response.ok) {
-                setAnalysis(data.prediction);
-                
-                // Extract emergency level from the analysis
-                const emergencyLevelMatch = data.prediction.match(/Emergency Level:\s*(\d)/i);
-                const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
-                setEmergencyLevel(level);
-                setShowRedirect(true);
-            } else {
-                setAnalysis("Error: " + (data.error || "Unexpected response"));
+            setAnalysis(response.data.analysis);
+
+            // Extract emergency level from the analysis
+            const emergencyLevelMatch = response.data.analysis.match(/Emergency Level:\s*(\d)/i);
+            const level = emergencyLevelMatch ? parseInt(emergencyLevelMatch[1]) : 3;
+            setEmergencyLevel(level);
+            setShowRedirect(true);
+
+            // Update medical history
+            if (user) {
+                dispatch(addMedicalHistory(
+                    response.data.analysis,  // analysis parameter
+                    videoUrl                 // url parameter
+                ));
             }
-            dispatch(addMedicalHistory(data.prediction, imageUrl));
         } catch (error) {
-            console.error('Error processing the image:', error);
-            setAnalysis("Error processing the image.");
+            console.error('Error during analysis:', error);
+            setAnalysis('Error during analysis. Please try again.');
         } finally {
             setIsAnalyzing(false);
         }
     };
 
-    // Generate PDF report with improved formatting
+    const resetAnalysis = () => {
+        setSelectedVideo(null);
+        setVideoPreview(null);
+        setAnalysis(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
+
     const generatePDF = () => {
         if (!analysis) {
             alert("No analysis data available to generate PDF.");
@@ -134,7 +132,6 @@ function AnalysisBotECG() {
         }
 
         try {
-            // Create new PDF document
             const doc = new jsPDF();
             const pageWidth = doc.internal.pageSize.getWidth();
             const pageHeight = doc.internal.pageSize.getHeight();
@@ -142,7 +139,7 @@ function AnalysisBotECG() {
             let yPosition = margin;
 
             // Add sky blue background
-            doc.setFillColor(208, 235, 255); // Light sky blue background
+            doc.setFillColor(208, 235, 255);
             doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
             // Add header with logo and title
@@ -158,8 +155,8 @@ function AnalysisBotECG() {
             
             doc.setFontSize(16);
             doc.setFont("helvetica", "bold");
-            doc.setTextColor(0, 51, 102); // Dark blue color for header
-            doc.text("CureConnect - ECG Analysis Report", pageWidth / 2, 20, { align: 'center' });
+            doc.setTextColor(0, 51, 102);
+            doc.text("CureConnect - ECG Video Analysis Report", pageWidth / 2, 20, { align: 'center' });
 
             // Add footer with logo and text
             const addFooter = () => {
@@ -186,7 +183,7 @@ function AnalysisBotECG() {
             doc.setFontSize(24);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(0, 51, 102);
-            doc.text("ECG Analysis Report", pageWidth / 2, yPosition, { align: 'center' });
+            doc.text("ECG Video Analysis Report", pageWidth / 2, yPosition, { align: 'center' });
 
             // Add a decorative line
             yPosition += 10;
@@ -208,14 +205,13 @@ function AnalysisBotECG() {
             yPosition += 10;
             doc.text(`Date: ${new Date().toLocaleString()}`, margin, yPosition);
 
-            // Analysis Results - Bold Header
+            // Analysis Results
             yPosition += 20;
             doc.setFontSize(14);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(0, 51, 102);
             doc.text("Analysis Results:", margin, yPosition);
 
-            // Format analysis text with proper wrapping
             yPosition += 10;
             doc.setFont("helvetica", "normal");
             doc.setFontSize(12);
@@ -223,15 +219,11 @@ function AnalysisBotECG() {
             
             const splitText = doc.splitTextToSize(analysis, pageWidth - (2 * margin));
             
-            // Check if text might overflow to next page
             if (yPosition + (splitText.length * 7) > pageHeight - margin) {
                 addFooter();
                 doc.addPage();
-                
-                // Add background to new page
                 doc.setFillColor(208, 235, 255);
                 doc.rect(0, 0, pageWidth, pageHeight, 'F');
-                
                 yPosition = margin;
             }
             
@@ -243,17 +235,15 @@ function AnalysisBotECG() {
             doc.setLineWidth(0.3);
             doc.roundedRect(margin - 5, yPosition - 5, pageWidth - (2 * margin) + 10, textHeight + 10, 3, 3);
 
-            // Add timestamp at the bottom
+            // Add timestamp
             yPosition = pageHeight - 30;
             doc.setFontSize(10);
             doc.setTextColor(102, 102, 102);
             doc.text(`Generated on: ${new Date().toLocaleString()}`, margin, yPosition);
 
-            // Add footer to the last page
             addFooter();
 
-            // Save the PDF with a proper filename
-            const filename = `ECG_Report_${user?.name?.replace(/\s+/g, '_') || 'Patient'}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
+            const filename = `ECG_Video_Report_${user?.name?.replace(/\s+/g, '_') || 'Patient'}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`;
             doc.save(filename);
             
             return true;
@@ -261,15 +251,6 @@ function AnalysisBotECG() {
             console.error('Error generating PDF:', error);
             alert("There was an error generating the PDF. Please try again.");
             return false;
-        }
-    };
-
-    // Reset the analysis state
-    const resetAnalysis = () => {
-        setSelectedImage(null);
-        setAnalysis(null);
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
         }
     };
 
@@ -311,6 +292,34 @@ function AnalysisBotECG() {
         } catch (error) {
             console.error("Error simplifying analysis:", error);
             throw new Error("Failed to simplify the analysis. Please try again.");
+        }
+    };
+
+    const analyzeImage = async (imageUrl) => {
+        try {
+            // Fetch image and convert to Base64
+            const response = await fetch(imageUrl);
+            const blob = await response.blob();
+
+            const base64Image = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(blob);
+                reader.onloadend = () => resolve(reader.result.split(",")[1]); 
+                reader.onerror = reject;
+            });
+
+            const result = await genAI.models.generateContent({
+                model: "gemini-2.0-flash",
+                contents: [
+                    { role: "user", parts: [{ text: "You are an expert cardiologist specializing in ECG analysis. Analyze the provided ECG image and provide a detailed analysis. Include the heart condition detected, confidence score, affected region, and recommendations. Use user-friendly language." }] },
+                    { role: "user", parts: [{ inlineData: { mimeType: "image/png", data: base64Image } }] }
+                ],
+            });
+
+            return result.text();
+        } catch (error) {
+            console.error("Error analyzing image:", error);
+            throw error;
         }
     };
 
@@ -366,24 +375,97 @@ function AnalysisBotECG() {
             <div className="max-w-4xl mx-auto px-4 py-8">
                 <Header />
                 <div className="bg-white rounded-2xl shadow-xl p-6 mb-8">
-                    <ImageUpload
-                        selectedImage={selectedImage}
-                        fileInputRef={fileInputRef}
-                        handleImageUpload={handleImageUpload}
-                        resetAnalysis={resetAnalysis}
-                    />
-                    <AnalysisResults
-                        isAnalyzing={isAnalyzing}
-                        analysis={analysis}
-                    />
-                    {analysis && (
-                        <button
-                            onClick={generatePDF}
-                            className="mt-4 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors shadow-md"
-                        >
-                            Download Report
-                        </button>
-                    )}
+                    <div className="text-center mb-8">
+                        <h1 className="text-3xl font-bold text-gray-900 mb-2">ECG Video Analysis</h1>
+                        <p className="text-gray-600">Upload a video for AI-powered ECG analysis</p>
+                    </div>
+
+                    <div className="space-y-6">
+                        {/* Video Upload Section */}
+                        <div className="bg-gray-50 rounded-xl p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center">
+                                    <svg className="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                                    </svg>
+                                    <h2 className="text-xl font-semibold text-gray-700 ml-2">Upload Video</h2>
+                                </div>
+                                {selectedVideo && (
+                                    <button
+                                        onClick={resetAnalysis}
+                                        className="text-red-500 hover:text-red-600 transition-colors"
+                                    >
+                                        Reset
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="space-y-4">
+                                <div
+                                    className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors cursor-pointer"
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        onChange={handleVideoUpload}
+                                        accept="video/*"
+                                        className="hidden"
+                                    />
+                                    {!selectedVideo ? (
+                                        <div>
+                                            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                            </svg>
+                                            <p className="mt-2 text-sm text-gray-600">
+                                                Click to upload or drag and drop
+                                            </p>
+                                            <p className="mt-1 text-xs text-gray-500">
+                                                MP4, MOV, or AVI (max. 100MB)
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <video
+                                                src={videoPreview}
+                                                controls
+                                                className="max-h-64 mx-auto rounded-lg"
+                                            />
+                                            <p className="mt-2 text-sm text-gray-600">
+                                                {selectedVideo.name}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {selectedVideo && !analysis && (
+                                    <button
+                                        onClick={handleUploadAndAnalyze}
+                                        disabled={isAnalyzing}
+                                        className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isAnalyzing ? 'Analyzing...' : 'Analyze Video'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Analysis Results Section */}
+                        <div className="bg-gray-50 rounded-xl p-6">
+                            <AnalysisResults
+                                analysis={analysis}
+                                isAnalyzing={isAnalyzing}
+                                isSimplifying={isSimplifying}
+                                isSimplified={isSimplified}
+                                onSimplify={handleSimplify}
+                                onShowMedicalTerms={() => {
+                                    setAnalysis(analysis);
+                                    setIsSimplified(false);
+                                }}
+                                onDownloadReport={generatePDF}
+                            />
+                        </div>
+                    </div>
                 </div>
                 <Disclaimer />
 
@@ -453,4 +535,4 @@ function AnalysisBotECG() {
     );
 }
 
-export default AnalysisBotECG;
+export default ECGVideoAnalysis; 
