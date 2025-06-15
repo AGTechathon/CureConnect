@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
 import { auth } from '../utils/firebaseConfig';
 
 export default function Layout() {
@@ -39,20 +38,21 @@ export default function Layout() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
-      <Stack>
-        {!isAuthenticated ? (
-          <Stack.Screen 
-            name="sign-in"
-            options={{ headerShown: false }}
-          />
-        ) : (
-          <Stack.Screen 
-            name="dashboard"
-            options={{ headerShown: false }}
-          />
-        )}
-      </Stack>
-    </View>
+    <Stack screenOptions={{ headerShown: false }}>
+      {!isAuthenticated ? (
+        <>
+          <Stack.Screen name="sign-in" />
+          <Stack.Screen name="sign-up" />
+        </>
+      ) : (
+        <>
+          <Stack.Screen name="dashboard" />
+          <Stack.Screen name="models" />
+          <Stack.Screen name="specific-diseases" />
+          <Stack.Screen name="specific-image-analysis" />
+          <Stack.Screen name="specific-video-analysis" />
+        </>
+      )}
+    </Stack>
   );
 }

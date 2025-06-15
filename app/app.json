@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Cureconnect",
-    "slug": "Cureconnect",
+    "name": "Helth",
+    "slug": "Helth",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "cureconnect",
+    "scheme": "helth",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -34,8 +34,7 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-audio",
-      "expo-video"
+      "expo-speech-recognition"
     ],
     "experiments": {
       "typedRoutes": true
